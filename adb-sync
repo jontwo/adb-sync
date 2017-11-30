@@ -304,7 +304,7 @@ class AdbFileSystem(object):
             raise OSError('pull failed')
 
 
-def BuildFileList(fs, path, prefix=b''):
+def BuildFileList(fs, path, prefix=b'', all_files=False):
     """Builds a file list.
 
     Args:
@@ -330,7 +330,10 @@ def BuildFileList(fs, path, prefix=b''):
         for n in files:
             if n == b'.' or n == b'..':
                 continue
-            for t in BuildFileList(fs, path + b'/' + n, prefix + b'/' + n):
+            # skip hidden files
+            if not all_files and n[:1] == b'.':
+                continue
+            for t in BuildFileList(fs, path + b'/' + n, prefix + b'/' + n, all_files):
                 yield t
     elif stat.S_ISREG(statresult.st_mode) or stat.S_ISLNK(statresult.st_mode):
         yield prefix, statresult
@@ -410,7 +413,7 @@ class FileSyncer(object):
 
     def __init__(self, adb, local_path, remote_path, local_to_remote,
                  remote_to_local, preserve_times, delete_missing, allow_overwrite,
-                 allow_replace, dry_run):
+                 allow_replace, dry_run, all_files):
         self.local = local_path
         self.remote = remote_path
         self.adb = adb
@@ -421,6 +424,7 @@ class FileSyncer(object):
         self.allow_overwrite = allow_overwrite
         self.allow_replace = allow_replace
         self.dry_run = dry_run
+        self.all_files = all_files
         self.local_only = None
         self.both = None
         self.remote_only = None
@@ -434,8 +438,8 @@ class FileSyncer(object):
     def ScanAndDiff(self):
         """Scans the local and remote locations and identifies differences."""
         _print(b'Scanning and diffing...')
-        locallist = BuildFileList(os, self.local)
-        remotelist = BuildFileList(self.adb, self.remote)
+        locallist = BuildFileList(os, self.local, all_files=self.all_files)
+        remotelist = BuildFileList(self.adb, self.remote, all_files=self.all_files)
         self.local_only, self.both, self.remote_only = DiffLists(locallist,
                                                                  remotelist)
         if not self.local_only and not self.both and not self.remote_only:
@@ -675,6 +679,8 @@ def main(*args):
     parser.add_argument('-P', '--port', metavar='PORT', type=str,
                         help='Port of adb server (default: 5037). ' +
                              'Corresponds to the "-P" option of adb.')
+    parser.add_argument('-a', '--all', action='store_true',
+                        help='Copy all files, including hidden files.')
     parser.add_argument('-R', '--reverse', action='store_true',
                         help='Reverse sync (pull, not push).')
     parser.add_argument('-2', '--two-way', action='store_true',
@@ -735,6 +741,7 @@ def main(*args):
     allow_replace = args.force
     allow_overwrite = not args.no_clobber
     dry_run = args.dry_run
+    all_files = args.all
     local_to_remote = True
     remote_to_local = False
     if args.two_way:
@@ -767,7 +774,7 @@ def main(*args):
         syncer = FileSyncer(adb, localpaths[i], remotepaths[i],
                             local_to_remote, remote_to_local, preserve_times,
                             delete_missing, allow_overwrite, allow_replace,
-                            dry_run)
+                            dry_run, all_files)
         if not syncer.IsWorking():
             _print(b'Device not connected or not working.')
             return
